@@ -5,10 +5,13 @@
  */
 package caphyon.jenkins.advinst;
 
-import java.io.File;
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
+import hudson.FilePath;
+import org.w3c.dom.Attr;
+import org.w3c.dom.Document;
+import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
+import org.xml.sax.SAXException;
+
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.parsers.ParserConfigurationException;
@@ -16,21 +19,19 @@ import javax.xml.xpath.XPath;
 import javax.xml.xpath.XPathConstants;
 import javax.xml.xpath.XPathExpressionException;
 import javax.xml.xpath.XPathFactory;
-import org.w3c.dom.Attr;
-import org.w3c.dom.Document;
-import org.w3c.dom.Node;
-import org.w3c.dom.NodeList;
-import org.xml.sax.SAXException;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Utility class that extract information by reading the AIP file directly.
  *
  * @author Ciprian Burca
  */
-public class AdvinstAipReader
+class AdvinstAipReader
 {
 
-  private final String mAipFile;
+  private final FilePath mAipFile;
   Document mXmlDocument = null;
 
   /**
@@ -38,7 +39,7 @@ public class AdvinstAipReader
    *
    * @param aAipFile Path to Advanced Installer project file (.AIP)
    */
-  public AdvinstAipReader(String aAipFile)
+  public AdvinstAipReader(FilePath aAipFile)
   {
     this.mAipFile = aAipFile;
   }
@@ -94,12 +95,8 @@ public class AdvinstAipReader
     }
 
     Attr nameAttr = (Attr) children.item(1).getAttributes().getNamedItem("Type");
-    if (null == nameAttr)
-    {
-      return false;
-    }
+    return null != nameAttr;
 
-    return true;
   }
 
   private void loadXmlFile() throws AdvinstException
@@ -113,7 +110,7 @@ public class AdvinstAipReader
 
       DocumentBuilderFactory documentBuilderFactory = DocumentBuilderFactory.newInstance();
       DocumentBuilder documentBuilder = documentBuilderFactory.newDocumentBuilder();
-      mXmlDocument = documentBuilder.parse(new File(mAipFile));
+      mXmlDocument = documentBuilder.parse(mAipFile.read());
     }
     catch (SAXException ex)
     {
@@ -124,6 +121,10 @@ public class AdvinstAipReader
       throw new AdvinstException("Failed to load AIP file. Exception: " + ex.getMessage(), ex);
     }
     catch (IOException ex)
+    {
+      throw new AdvinstException("Failed to load AIP file. Exception: " + ex.getMessage(), ex);
+    }
+    catch (InterruptedException ex)
     {
       throw new AdvinstException("Failed to load AIP file. Exception: " + ex.getMessage(), ex);
     }

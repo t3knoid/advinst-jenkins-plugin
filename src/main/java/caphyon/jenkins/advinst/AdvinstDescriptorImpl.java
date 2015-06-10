@@ -6,17 +6,16 @@ import hudson.model.Descriptor;
 import hudson.tasks.BuildStepDescriptor;
 import hudson.tasks.Builder;
 import hudson.util.FormValidation;
+import net.sf.json.JSONObject;
+import org.kohsuke.stapler.QueryParameter;
+import org.kohsuke.stapler.StaplerRequest;
+
+import javax.servlet.ServletException;
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ResourceBundle;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import javax.servlet.ServletException;
-import net.sf.json.JSONObject;
-import org.kohsuke.stapler.QueryParameter;
-import org.kohsuke.stapler.StaplerRequest;
 
 /**
  * Descriptor for {@link AdvinstBuilder}. Used as a singleton. The class is
@@ -51,20 +50,7 @@ public final class AdvinstDescriptorImpl extends BuildStepDescriptor<Builder>
     {
       return FormValidation.error(mMessagesBundle.getString("ERR_REQUIRED"));
     }
-    // Check if directory exists
-    Path advinstRoot = Paths.get(value);
-    if (Files.notExists(advinstRoot))
-    {
-      return FormValidation.error(mMessagesBundle.getString("ERR_PATH_NOT_FOUND"));
-    }
 
-    Path advinstPath = Paths.get(advinstRoot.toString(),
-            AdvinstConsts.AdvinstToolsSubfolder, AdvinstConsts.AdvinstComApp);
-
-    if (Files.notExists(advinstPath))
-    {
-      return FormValidation.error(mMessagesBundle.getString("ERR_INVALID_ADVINST_FOLDER"));
-    }
     return FormValidation.ok();
   }
 
@@ -73,12 +59,6 @@ public final class AdvinstDescriptorImpl extends BuildStepDescriptor<Builder>
     if (value == null || value.length() == 0)
     {
       return FormValidation.error(mMessagesBundle.getString("ERR_REQUIRED"));
-    }
-    // Check if directory exists
-    Path advinstRoot = Paths.get(value);
-    if (Files.notExists(advinstRoot))
-    {
-      return FormValidation.error(mMessagesBundle.getString("ERR_PATH_NOT_FOUND"));
     }
 
     return FormValidation.ok();
@@ -151,17 +131,6 @@ public final class AdvinstDescriptorImpl extends BuildStepDescriptor<Builder>
    */
   public String getAdvinstRootPath()
   {
-    return this.mAdvinstRootPath;
-  }
-
-  public String getAdvinstComPath()
-  {
-    if (this.getAdvinstRootPath().isEmpty())
-    {
-      return "";
-    }
-
-    return Paths.get(this.mAdvinstRootPath, AdvinstConsts.AdvinstToolsSubfolder,
-            AdvinstConsts.AdvinstComApp).toString();
+    return Paths.get(this.mAdvinstRootPath).toString();
   }
 }

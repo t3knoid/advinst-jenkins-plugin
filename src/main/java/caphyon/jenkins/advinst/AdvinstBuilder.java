@@ -1,33 +1,32 @@
 package caphyon.jenkins.advinst;
 
 import hudson.EnvVars;
+import hudson.FilePath;
 import hudson.Launcher;
+import hudson.Util;
 import hudson.model.AbstractBuild;
 import hudson.model.BuildListener;
 import hudson.model.FreeStyleProject.DescriptorImpl;
 import hudson.model.Result;
 import hudson.tasks.Builder;
-import java.io.File;
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Paths;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.ResourceBundle;
 import org.kohsuke.stapler.DataBoundConstructor;
 import org.kohsuke.stapler.StaplerRequest;
 
+import java.io.IOException;
+import java.util.List;
+import java.util.ResourceBundle;
+
 /**
  * Sample {@link Builder}.
- *
- * <p>
+ * <p/>
+ * <p/>
  * When the user configures the project and enables this builder,
  * {@link DescriptorImpl#newInstance(StaplerRequest)} is invoked and a new
  * {@link AdvinstBuilder} is created. The created instance is persisted to the
  * project configuration XML by using XStream, so this allows you to use
  * instance fields (like {@link #name}) to remember the configuration.
- *
- * <p>
+ * <p/>
+ * <p/>
  * When a build is performed, the
  * {@link #perform(AbstractBuild, Launcher, BuildListener)} method will be
  * invoked.
@@ -38,34 +37,32 @@ public class AdvinstBuilder extends Builder
 {
 
   private static final ResourceBundle mMessagesBundle = ResourceBundle.getBundle("Messages");
-  private final String mAipProjectPath;
-  private final String mAipProjectBuild;
-  private final String mAipProjectOutputFolder;
-  private final String mAipProjectOutputName;
-  private final boolean mAipProjectNoDigitalSignature;
+  private final AdvinstParameters mAdvinstParameters;
 
   /**
    * Class DataBoundConstructor. Fields in config.jelly must match the
    * parameter names in the "DataBoundConstructor"
    *
-   * @param aipProjectPath path to the Advanced Installer project to be built
-   * @param aipProjectBuild build name to be executed
-   * @param aipProjectOutputFolder output folder for the result package
-   * @param aipProjectOutputName name of the result package
+   * @param aipProjectPath               path to the Advanced Installer project to be buil
+   * @param aipProjectBuild              build name to be executed
+   * @param aipProjectOutputFolder       output folder for the result package
+   * @param aipProjectOutputName         name of the result package
    * @param aipProjectNoDigitalSignature tells to skip the digital signature
-   * step
+   *                                     step
    */
   @DataBoundConstructor
   public AdvinstBuilder(String aipProjectPath, String aipProjectBuild,
-          String aipProjectOutputFolder, String aipProjectOutputName,
-          boolean aipProjectNoDigitalSignature)
+                        String aipProjectOutputFolder, String aipProjectOutputName,
+                        boolean aipProjectNoDigitalSignature)
   {
-    this.mAipProjectPath = aipProjectPath;
-    this.mAipProjectBuild = aipProjectBuild;
-    this.mAipProjectOutputFolder = aipProjectOutputFolder;
-    this.mAipProjectOutputName = aipProjectOutputName;
-    this.mAipProjectNoDigitalSignature = aipProjectNoDigitalSignature;
+    this.mAdvinstParameters = new AdvinstParameters();
+    this.mAdvinstParameters.set(AdvinstConsts.AdvinstParamAipPath, aipProjectPath);
+    this.mAdvinstParameters.set(AdvinstConsts.AdvinstParamAipBuild, aipProjectBuild);
+    this.mAdvinstParameters.set(AdvinstConsts.AdvinstParamAipOutputFolder, aipProjectOutputFolder);
+    this.mAdvinstParameters.set(AdvinstConsts.AdvinstParamAipOutputName, aipProjectOutputName);
+    this.mAdvinstParameters.set(AdvinstConsts.AdvinstParamAipNoDigSig, aipProjectNoDigitalSignature);
   }
+
 
   /**
    * Performs the build.
@@ -78,209 +75,45 @@ public class AdvinstBuilder extends Builder
   @Override
   public boolean perform(AbstractBuild build, Launcher launcher, BuildListener listener)
   {
-    boolean success = false;
-
-    String advinstComPath = getDescriptor().getAdvinstComPath();
-    String absoluteAipPath = "";
-    String absoluteOutputFolder = "";
-    String buildName = "";
-    String packageName = "";
-
-    //------------------------------------------------------------------------
-    // Validate Advanced Installer path
+    boolean success;
+    try
     {
-      if (advinstComPath.isEmpty())
-      {
-        listener.fatalError(mMessagesBundle.getString("ERR_ADVINST_FOLDER_NOT_SET"));
-        build.setResult(Result.FAILURE);
-        return false;
-      }
+      EnvVars env = build.getEnvironment(listener);
+      final FilePath advinstComPath = getAdvinstComPath(build, launcher, env);
+      final FilePath advinstAipPath = getAdvinstAipPath(build, launcher, env);
 
-      if (Files.notExists(Paths.get(advinstComPath)))
-      {
-        listener.fatalError(String.format(mMessagesBundle.getString("ERR_ADVINST_COM_NOT_FOUND"), advinstComPath));
-        build.setResult(Result.FAILURE);
-        return false;
-      }
+
+      AdvinstParametersProcessor paramsProcessor =
+        new AdvinstParametersProcessor(mAdvinstParameters, advinstAipPath, build, env);
+      final List<String> commands = paramsProcessor.getCommands();
+
+      AdvinstTool advinstTool = new AdvinstTool(advinstComPath);
+      success = advinstTool.executeCommands(commands, advinstAipPath,
+        build, launcher, listener, env);
+      build.setResult(success ? Result.SUCCESS : Result.FAILURE);
     }
-
-    //-------------------------------------------------------------------------
-    // Compute and validate AIP project path. It can be either an absolute path
-    // or relative to the build workspace folder
+    catch (IOException e)
     {
-      try
-      {
-        File aipPath = new File(getAipProjectPath());
-        if (aipPath.isAbsolute())
-        {
-          absoluteAipPath = getAipProjectPath();
-        }
-        else //compute absolute path using build.getWorkspace() as root.
-        {
-          File root = new File(build.getWorkspace().toURI());
-          absoluteAipPath = new File(root, aipPath.getPath()).getAbsolutePath();
-        }
-      }
-      catch (IOException iOException)
-      {
-        listener.fatalError(mMessagesBundle.getString("ERR_ADVINST_AIP_PATH_COMPUTE"));
-        build.setResult(Result.FAILURE);
-        return false;
-      }
-      catch (InterruptedException interruptedException)
-      {
-        listener.fatalError(mMessagesBundle.getString("ERR_ADVINST_AIP_PATH_COMPUTE"));
-        build.setResult(Result.FAILURE);
-        return false;
-      }
-
-      if (Files.notExists(Paths.get(absoluteAipPath)))
-      {
-        listener.fatalError(String.format(mMessagesBundle.getString("ERR_ADVINST_AIP_NOT_FOUND"), absoluteAipPath));
-        build.setResult(Result.FAILURE);
-        return false;
-      }
+      listener.fatalError(e.getMessage());
+      build.setResult(Result.FAILURE);
+      return false;
     }
-
-    //------------------------------------------------------------------------
-    // Compute and validate output folder path. It can be either an absolute path
-    // or relative to the build workspace folder.
+    catch (InterruptedException e)
     {
-      try
-      {
-        //Because the output folder may reference environment variables, expand them
-        //before computing the absolute path.
-        EnvVars envVars = build.getEnvironment(listener);
-        String expandedValue = envVars.expand(getAipProjectOutputFolder());
-
-        File outputFolder = new File(expandedValue);
-        if (outputFolder.isAbsolute())
-        {
-          absoluteOutputFolder = getAipProjectOutputFolder();
-        }
-        else
-        {
-          File root = new File(build.getWorkspace().toURI());
-          absoluteOutputFolder = new File(root, outputFolder.getPath()).getAbsolutePath();
-        }
-      }
-      catch (IOException iOException)
-      {
-        listener.fatalError(mMessagesBundle.getString("ERR_ADVINST_AIP_OUTPUT_PATH_COMPUTE"));
-        build.setResult(Result.FAILURE);
-        return false;
-      }
-      catch (InterruptedException interruptedException)
-      {
-        listener.fatalError(mMessagesBundle.getString("ERR_ADVINST_AIP_OUTPUT_PATH_COMPUTE"));
-        build.setResult(Result.FAILURE);
-        return false;
-      }
+      listener.fatalError(e.getMessage());
+      build.setResult(Result.FAILURE);
+      return false;
     }
-
-    //------------------------------------------------------------------------
-    // compute and validate build name.
+    catch (AdvinstException e)
     {
-      try
-      {
-        EnvVars envVars = build.getEnvironment(listener);
-        buildName = envVars.expand(getAipProjectBuild());
-      }
-      catch (IOException ex)
-      {
-        listener.fatalError(mMessagesBundle.getString("ERR_ADVINST_AIP_BUILD_NAME_COMPUTE"));
-        build.setResult(Result.FAILURE);
-        return false;
-      }
-      catch (InterruptedException ex)
-      {
-        listener.fatalError(mMessagesBundle.getString("ERR_ADVINST_AIP_BUILD_NAME_COMPUTE"));
-        build.setResult(Result.FAILURE);
-        return false;
-      }
-
-      //Check if this build actually exists in the AIP
-      try
-      {
-        AdvinstAipReader aipReader = new AdvinstAipReader(absoluteAipPath);
-        if (!buildName.isEmpty() && !aipReader.getBuilds().contains(buildName))
-        {
-          listener.fatalError(mMessagesBundle.getString("ERR_ADVINST_AIP_BUILD_NOT_FOUND"));
-          build.setResult(Result.FAILURE);
-          return false;
-        }
-      }
-      catch (AdvinstException ex)
-      {
-        listener.fatalError(ex.getMessage());
-        build.setResult(Result.FAILURE);
-        return false;
-      }
+      listener.fatalError(e.getMessage());
+      build.setResult(Result.FAILURE);
+      return false;
     }
-
-    //------------------------------------------------------------------------
-    //compute and validate the output package name
-    {
-      try
-      {
-        EnvVars envVars = build.getEnvironment(listener);
-        packageName = envVars.expand(getAipProjectOutputName());
-      }
-      catch (IOException ex)
-      {
-        listener.fatalError(mMessagesBundle.getString("ERR_ADVINST_AIP_OUTPUT_NAME_COMPUTE"));
-        build.setResult(Result.FAILURE);
-        return false;
-      }
-      catch (InterruptedException ex)
-      {
-        listener.fatalError(mMessagesBundle.getString("ERR_ADVINST_AIP_OUTPUT_NAME_COMPUTE"));
-        build.setResult(Result.FAILURE);
-        return false;
-      }
-    }
-
-    //------------------------------------------------------------------------
-    //make the necesary configurations and run the build
-    {
-      try
-      {
-        List<String> advinstCommands = new ArrayList<String>();
-
-        if (!packageName.isEmpty())
-        {
-          advinstCommands.add(String.format("SetPackageName \"%s\" -buildname \"%s\"", packageName, buildName));
-        }
-
-        if (!absoluteOutputFolder.isEmpty())
-        {
-          advinstCommands.add(String.format("SetOutputLocation -buildname \"%s\" -path \"%s\"", buildName, absoluteOutputFolder));
-        }
-
-        if (getAipProjectNoDigitalSignature())
-        {
-          advinstCommands.add("ResetSig");
-        }
-
-        advinstCommands.add(String.format("Build -buildslist \"%s\"", buildName));
-
-        StringBuilder executeLog = new StringBuilder();
-        success = AdvinstCommands.executeCommandsBatch(advinstComPath, absoluteAipPath, advinstCommands, executeLog);
-        listener.getLogger().println(executeLog);
-        build.setResult(success ? Result.SUCCESS : Result.FAILURE);
-        return success;
-      }
-      catch (AdvinstException ex)
-      {
-        listener.fatalError(ex.getMessage());
-        build.setResult(Result.FAILURE);
-        return false;
-      }
-    }
+    return success;
   }
 
   /**
-   *
    * @return
    */
   @Override
@@ -295,7 +128,7 @@ public class AdvinstBuilder extends Builder
    */
   public String getAipProjectPath()
   {
-    return this.mAipProjectPath;
+    return this.mAdvinstParameters.get(AdvinstConsts.AdvinstParamAipPath, "");
   }
 
   /**
@@ -303,7 +136,7 @@ public class AdvinstBuilder extends Builder
    */
   public String getAipProjectBuild()
   {
-    return this.mAipProjectBuild;
+    return this.mAdvinstParameters.get(AdvinstConsts.AdvinstParamAipBuild, "");
   }
 
   /**
@@ -311,7 +144,7 @@ public class AdvinstBuilder extends Builder
    */
   public String getAipProjectOutputFolder()
   {
-    return this.mAipProjectOutputFolder;
+    return this.mAdvinstParameters.get(AdvinstConsts.AdvinstParamAipOutputFolder, "");
   }
 
   /**
@@ -319,7 +152,7 @@ public class AdvinstBuilder extends Builder
    */
   public String getAipProjectOutputName()
   {
-    return this.mAipProjectOutputName;
+    return this.mAdvinstParameters.get(AdvinstConsts.AdvinstParamAipOutputName, "");
   }
 
   /**
@@ -328,6 +161,63 @@ public class AdvinstBuilder extends Builder
    */
   public boolean getAipProjectNoDigitalSignature()
   {
-    return this.mAipProjectNoDigitalSignature;
+    return this.mAdvinstParameters.get(AdvinstConsts.AdvinstParamAipNoDigSig, false);
+  }
+
+  private FilePath getAdvinstComPath(final AbstractBuild<?, ?> build, final Launcher launcher, final EnvVars env) throws AdvinstException
+  {
+    final String advinstRootPathParam = getDescriptor().getAdvinstRootPath();
+    if (advinstRootPathParam.isEmpty())
+    {
+      throw new AdvinstException(mMessagesBundle.getString("ERR_ADVINST_FOLDER_NOT_SET"));
+    }
+    String expandedValue  = Util.replaceMacro(advinstRootPathParam, env);
+    expandedValue = Util.replaceMacro(expandedValue, build.getBuildVariables());
+    assert expandedValue != null;
+    FilePath advinstRootPath = new FilePath(launcher.getChannel(), expandedValue);
+    FilePath advinstComPath = new FilePath(advinstRootPath, AdvinstConsts.AdvinstComSubPath);
+    try
+    {
+      if (!advinstComPath.exists())
+      {
+        throw new AdvinstException(String.format(mMessagesBundle.getString("ERR_ADVINST_COM_NOT_FOUND"), advinstComPath), null);
+      }
+    }
+    catch (IOException e)
+    {
+      throw new AdvinstException(e);
+    }
+    catch (InterruptedException e)
+    {
+      throw new AdvinstException(e);
+    }
+
+    return advinstComPath;
+  }
+
+  private FilePath getAdvinstAipPath(final AbstractBuild<?, ?> build, final Launcher launcher, final EnvVars env) throws AdvinstException
+  {
+    final String advinstAipPathParam = getAipProjectPath();
+    String expandedValue  = Util.replaceMacro(advinstAipPathParam, env);
+    expandedValue = Util.replaceMacro(expandedValue, build.getBuildVariables());
+    assert expandedValue != null;
+    FilePath advinstAipPath = new FilePath(build.getWorkspace(), expandedValue);
+    try
+    {
+      if (!advinstAipPath.exists())
+      {
+        throw new AdvinstException(String.format(mMessagesBundle.getString("ERR_ADVINST_AIP_NOT_FOUND"), advinstAipPath));
+      }
+    }
+    catch (IOException e)
+    {
+      throw new AdvinstException(e);
+    }
+    catch (InterruptedException e)
+    {
+      throw new AdvinstException(e);
+    }
+
+    return advinstAipPath;
   }
 }

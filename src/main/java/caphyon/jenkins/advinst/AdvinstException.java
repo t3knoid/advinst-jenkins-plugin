@@ -17,4 +17,14 @@ public class AdvinstException extends Exception
   {
     super(message, t);
   }
+
+  public AdvinstException(String message)
+  {
+    super(message);
+  }
+
+  public AdvinstException(Throwable t)
+  {
+    super(t);
+  }
 }
